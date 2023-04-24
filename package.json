@@ -1,0 +1,22 @@
+{
+  "name": "web-audio-lit",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tronicboy/lit-from-event": "file:.yalc/@tronicboy/lit-from-event",
+    "@tronicboy/lit-observe-directive": "^0.0.7",
+    "lit": "^2.6.1",
+    "rxjs": "^7.8.0"
+  },
+  "devDependencies": {
+    "@types/audioworklet": "^0.0.41",
+    "typescript": "^5.0.4",
+    "vite": "^4.3.0"
+  }
+}

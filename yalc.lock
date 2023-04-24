@@ -1,0 +1,11 @@
+{
+  "version": "v1",
+  "packages": {
+    "@tronicboy/lit-from-event": {
+      "version": "0.0.3",
+      "signature": "9c7153e2b5e95fba836e18fe99e081db",
+      "file": true,
+      "replaced": "^0.0.2"
+    }
+  }
+}

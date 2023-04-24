@@ -1,0 +1,31 @@
+{
+  "name": "@tronicboy/lit-from-event",
+  "version": "0.0.3",
+  "description": "A decorator that provides a an observable of an event",
+  "main": "lib/index.js",
+  "types": "./types/index.d.ts",
+  "author": "Austin J. Mayer",
+  "exports": {
+    "import": "./lib/index.js",
+    "types": "./types/index.d.ts"
+  },
+  "files": [
+    "lib",
+    "types",
+    "./README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tronicboy1/lit-from-event"
+  },
+  "license": "MIT",
+  "private": false,
+  "dependencies": {
+    "lit": "^2.7.2",
+    "rxjs": "^7.8.0"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "yalcSig": "9c7153e2b5e95fba836e18fe99e081db"
+}
