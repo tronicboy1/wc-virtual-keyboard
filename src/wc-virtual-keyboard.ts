@@ -62,7 +62,7 @@ export class MyElement extends LitElement {
     startWith(3),
     shareReplay(1)
   );
-  private keysToWatch = ["a", "s", "d", "f", "g", "h", "j", "k", "w", "e", 't', 'y', 'u'];
+  private keysToWatch = ["a", "s", "d", "f", "g", "h", "j", "k", "w", "e", "t", "y", "u"];
   private physicalKeydown$ = fromEvent<KeyboardEvent>(document, "keydown").pipe(
     takeUntil(this.teardown$),
     map(({ key }) => key)
@@ -98,11 +98,11 @@ export class MyElement extends LitElement {
     ["e", 7],
     ["d", 8],
     ["f", 9],
-    ['t', 10],
+    ["t", 10],
     ["g", 11],
-    ['y', 12],
+    ["y", 12],
     ["h", 13],
-    ['u', 14],
+    ["u", 14],
     ["j", 15],
     ["k", 16],
   ]);
@@ -164,7 +164,7 @@ export class MyElement extends LitElement {
     this.distortion.oversample = "4x";
     this.masterGain.connect(this.audCtx.destination);
     this.masterGain.connect(this.analyser);
-    this.analyser.fftSize = 2048;
+    this.analyser.fftSize = 2 ** 12;
     this.upDownKeydown$
       .pipe(withLatestFrom(this.octave$))
       .subscribe(([arrow, octave]) => this.octaveSubject.next(arrow === "ArrowUp" ? octave + 1 : octave - 1));
@@ -258,6 +258,7 @@ export class MyElement extends LitElement {
     if (this.activeNotes.has(hz)) return;
     const osc = this.audCtx.createOscillator();
     const gain = this.audCtx.createGain();
+    gain.gain.linearRampToValueAtTime(0.6, this.audCtx.currentTime + 0.1);
     if (distortion) {
       osc.connect(this.distortion).connect(gain).connect(this.masterGain);
     } else {
@@ -309,7 +310,7 @@ export class MyElement extends LitElement {
           </li>
         </ul>
       </nav>
-      <canvas height="300" width="600"></canvas>
+      <canvas height="600" width="1200"></canvas>
       <ul class="keyboard" @mouseleave=${() => this.mouseleaveKeyboard$.next()}>
         ${observe(
           this.octave$.pipe(

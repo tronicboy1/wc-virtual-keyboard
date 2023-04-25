@@ -20,7 +20,6 @@ ctx$.pipe(first()).subscribe(({ context, w, h }) => {
 });
 
 dataArray$.pipe(withLatestFrom(ctx$)).subscribe(([dataArray, { context, w, h }]) => {
-  console.log("render");
   // https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API/Visualizations_with_Web_Audio_API
   const bufferLength = dataArray.length;
   context.fillStyle = "rgb(200, 200, 200)";
