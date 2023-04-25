@@ -47,7 +47,7 @@ export class MyElement extends LitElement {
   private volumeSubject = new Subject<number>();
   private volume$ = merge(this.volumeChangeNumber$, this.volumeSubject).pipe(
     filter((volume) => volume >= 0 && volume <= 2),
-    startWith(1),
+    startWith(0.5),
     distinctUntilChanged(),
     shareReplay(1)
   );
@@ -299,7 +299,14 @@ export class MyElement extends LitElement {
             <label for="volume">Volume: ${observe(this.volume$.pipe(map((vol) => vol.toFixed(1))))}</label>
             <input type="range" id="volume" min="0" max="2" value="1" step="0.01" value=${observe(this.volume$)} />
           </li>
-          <li>Freq: <small>${observe(this.currentmouseKeydown$.pipe(map((hz) => hz.toFixed(2))))}</small></li>
+          <li>
+            Freq:
+            <small
+              >${observe(
+                this.activeNotes.value$.pipe(map((notes) => (notes.size === 1 ? notes.keys().next().value : "")))
+              )}</small
+            >
+          </li>
           <li>
             <label for="octave">Octave</label>
             <input type="number" min="0" max="7" id="octave" value=${observe(this.octave$)} />
@@ -415,6 +422,11 @@ export class MyElement extends LitElement {
     }
     label {
       user-select: none;
+    }
+    canvas {
+      border: solid 1px grey;
+      border-radius: 4px 4px 0 0;
+      border-bottom: none;
     }
   `;
 }
