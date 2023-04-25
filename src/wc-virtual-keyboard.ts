@@ -35,7 +35,7 @@ export class MyElement extends LitElement {
   private teardown$ = new Subject<void>();
   private audCtx = new AudioContext();
 
-  private gain = new GainNode(this.audCtx);
+  private masterGain = new GainNode(this.audCtx);
   @queryFromEvent("#volume", "input", { returnElementRef: true }) volumeChange$!: Observable<HTMLInputElement>;
   private volume$ = this.volumeChange$.pipe(
     map((el) => el.value),
@@ -49,7 +49,7 @@ export class MyElement extends LitElement {
     map((el) => el.value),
     map(Number),
     filter((octave) => !isNaN(octave)),
-    startWith(0),
+    startWith(3),
     shareReplay(1)
   );
   private keysToWatch = ["a", "s", "d", "f", "g", "h", "j", "k"];
@@ -112,37 +112,42 @@ export class MyElement extends LitElement {
     )
   );
   private stop$ = merge(this.keyup$, this.mouseleave$);
-  private activeNotes = new Map<number, OscillatorNode>();
+  private activeNotes = new Map<number, { osc: OscillatorNode; gain: GainNode }>();
+  @queryFromEvent("#distort", "input", { returnElementRef: true }) distortChange$!: Observable<HTMLInputElement>;
+  private distortOn$ = this.distortChange$.pipe(
+    map((el) => el.checked),
+    startWith(false),
+    takeUntil(this.teardown$),
+    shareReplay(1)
+  );
+  private distortion = this.audCtx.createWaveShaper();
+  private analyser = this.audCtx.createAnalyser();
 
   constructor() {
     super();
-    this.gain.connect(this.audCtx.destination);
-    this.volume$.pipe(takeUntil(this.teardown$)).subscribe((volume) => {
-      this.gain.gain.value = volume;
-    });
-
-    this.physicalKeysDownMapped$.subscribe((keysDown) => {
-      keysDown.forEach((hz) => {
-        if (this.activeNotes.has(hz)) return;
-        this.startNote(hz);
-      });
-      this.activeNotes.forEach((node, hz) => {
-        if (!keysDown.includes(hz)) {
-          node.stop();
-          this.activeNotes.delete(hz);
-        }
-      });
-    });
+    this.distortion.curve = this.makeDistortionCurve(4000);
+    this.distortion.oversample = "4x";
+    this.masterGain.connect(this.audCtx.destination);
+    this.masterGain.connect(this.analyser);
   }
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.currentmouseKeydown$.subscribe((hz) => {
-      this.startNote(hz);
+    this.volume$.pipe(takeUntil(this.teardown$)).subscribe((volume) => {
+      this.masterGain.gain.value = volume;
     });
-    this.stop$.subscribe((hz) => {
-      this.activeNotes.get(hz)?.stop();
-      this.activeNotes.delete(hz);
+    this.currentmouseKeydown$.subscribe((hz) => this.startNote(hz));
+    this.stop$.subscribe((hz) => this.stopNote(hz));
+    this.physicalKeysDownMapped$.pipe(withLatestFrom(this.distortOn$)).subscribe(([keysDown, distort]) => {
+      keysDown.forEach((hz) => {
+        if (this.activeNotes.has(hz)) return;
+        this.startNote(hz, distort);
+      });
+      this.activeNotes.forEach((_, hz) => {
+        if (!keysDown.includes(hz)) {
+          this.stopNote(hz);
+        }
+      });
     });
   }
 
@@ -198,17 +203,45 @@ export class MyElement extends LitElement {
     return freqs;
   }
 
-  private startNote(hz: number) {
-    const newOsc = this.audCtx.createOscillator();
-    newOsc.connect(this.gain);
-    newOsc.frequency.value = hz;
-    newOsc.start();
-    this.activeNotes.set(hz, newOsc);
+  private startNote(hz: number, distortion?: boolean) {
+    if (this.activeNotes.has(hz)) return;
+    const osc = this.audCtx.createOscillator();
+    const gain = this.audCtx.createGain();
+    if (distortion) {
+      osc.connect(this.distortion).connect(gain).connect(this.masterGain);
+    } else {
+      osc.connect(gain).connect(this.masterGain);
+    }
+    osc.frequency.value = hz;
+    osc.start();
+    this.activeNotes.set(hz, { osc, gain });
+  }
+
+  private stopNote(hz: number) {
+    if (!this.activeNotes.has(hz)) return;
+    const { osc, gain } = this.activeNotes.get(hz)!;
+    const stopTime = this.audCtx.currentTime + 0.2;
+    gain.gain.linearRampToValueAtTime(0, stopTime);
+    osc.stop(stopTime);
+    this.activeNotes.delete(hz);
+  }
+
+  private makeDistortionCurve(amount: number) {
+    const curve = new Float32Array(this.sampleRate);
+    const deg = Math.PI / 180;
+
+    // sigmoid curve
+    // https://developer.mozilla.org/en-US/docs/Web/API/BaseAudioContext/createWaveShaper#examples
+    for (let i = 0; i < this.sampleRate; i++) {
+      const x = (i * 2) / this.sampleRate - 1;
+      curve[i] = ((3 + amount) * x * 20 * deg) / (Math.PI + amount * Math.abs(x));
+    }
+    return curve;
   }
 
   render() {
     return html`
-      <nav>
+      <nav class="controls">
         <ul>
           <li>
             <label for="volume">Volume: ${observe(this.volume$)}</label>
@@ -222,10 +255,14 @@ export class MyElement extends LitElement {
               value=${observe(this.volume$.pipe(sampleTime(500)))}
             />
           </li>
-          <li>Freq: ${observe(this.currentmouseKeydown$)}</li>
+          <li>Freq: <small>${observe(this.currentmouseKeydown$.pipe(map((hz) => hz.toFixed(2))))}</small></li>
           <li>
             <label for="octave">Octave</label>
             <input type="number" min="0" id="octave" value=${observe(this.octave$)} />
+          </li>
+          <li>
+            <label for="distort">Distort</label>
+            <input type="checkbox" id="distort" name="distort" .checked=${observe(this.distortOn$)} />
           </li>
         </ul>
       </nav>
@@ -270,6 +307,7 @@ export class MyElement extends LitElement {
       display: flex;
       flex-direction: column;
       margin-bottom: 1rem;
+      align-items: center;
     }
     ul {
       list-style-type: none;
@@ -293,6 +331,32 @@ export class MyElement extends LitElement {
     .keyboard .blackkey {
       background-color: black;
       color: white;
+    }
+
+    .controls {
+      margin-bottom: 0.5rem;
+    }
+    .controls ul {
+      display: flex;
+      flex-direction: row;
+      width: 100%;
+    }
+
+    .controls li {
+      margin: 0 1rem;
+    }
+    .controls li:first-child {
+      margin-left: 0;
+    }
+    .controls li:last-child {
+      margin-right: 0;
+    }
+    .controls small {
+      width: 44px;
+      overflow: hidden;
+    }
+    label {
+      user-select: none;
     }
   `;
 }
