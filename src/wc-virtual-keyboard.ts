@@ -375,6 +375,7 @@ export class MyElement extends LitElement {
       display: flex;
       flex-direction: row;
       margin: 0;
+      user-select: none;
     }
     .keyboard li {
       height: 200px;
