@@ -37,9 +37,13 @@ export class MyElement extends LitElement {
 
   private masterGain = new GainNode(this.audCtx);
   @queryFromEvent("#volume", "input", { returnElementRef: true }) volumeChange$!: Observable<HTMLInputElement>;
-  private volume$ = this.volumeChange$.pipe(
+  private volumeChangeNumber$ = this.volumeChange$.pipe(
     map((el) => el.value),
-    map(Number),
+    map(Number)
+  );
+  private volumeSubject = new Subject<number>();
+  private volume$ = merge(this.volumeChangeNumber$, this.volumeSubject).pipe(
+    filter((volume) => volume >= 0 && volume <= 2),
     startWith(1),
     distinctUntilChanged(),
     shareReplay(1)
@@ -103,6 +107,9 @@ export class MyElement extends LitElement {
   private upDownKeydown$ = this.physicalKeydown$.pipe(
     filter((key): key is "ArrowUp" | "ArrowDown" => key === "ArrowUp" || key === "ArrowDown")
   );
+  private lRKeydown$ = this.physicalKeydown$.pipe(
+    filter((key): key is "ArrowLeft" | "ArrowRight" => key === "ArrowLeft" || key === "ArrowRight")
+  );
 
   private mouseKeydown$ = new Subject<number>();
   private keyup$ = new Subject<number>();
@@ -137,13 +144,12 @@ export class MyElement extends LitElement {
     this.distortion.oversample = "4x";
     this.masterGain.connect(this.audCtx.destination);
     this.masterGain.connect(this.analyser);
-    this.upDownKeydown$.pipe(withLatestFrom(this.octave$)).subscribe(([arrow, octave]) => {
-      if (arrow === "ArrowUp") {
-        this.octaveSubject.next(octave + 1);
-      } else {
-        this.octaveSubject.next(octave - 1);
-      }
-    });
+    this.upDownKeydown$
+      .pipe(withLatestFrom(this.octave$))
+      .subscribe(([arrow, octave]) => this.octaveSubject.next(arrow === "ArrowUp" ? octave + 1 : octave - 1));
+    this.lRKeydown$
+      .pipe(withLatestFrom(this.volume$))
+      .subscribe(([arrow, volume]) => this.volumeSubject.next(arrow === "ArrowLeft" ? volume - 0.1 : volume + 0.1));
   }
 
   connectedCallback(): void {
@@ -237,7 +243,7 @@ export class MyElement extends LitElement {
   private stopNote(hz: number) {
     if (!this.activeNotes.has(hz)) return;
     const { osc, gain } = this.activeNotes.get(hz)!;
-    const stopTime = this.audCtx.currentTime + 0.2;
+    const stopTime = this.audCtx.currentTime + 0.3;
     gain.gain.linearRampToValueAtTime(0, stopTime);
     osc.stop(stopTime);
     this.activeNotes.delete(hz);
@@ -261,16 +267,8 @@ export class MyElement extends LitElement {
       <nav class="controls">
         <ul>
           <li>
-            <label for="volume">Volume: ${observe(this.volume$)}</label>
-            <input
-              type="range"
-              id="volume"
-              min="0"
-              max="2"
-              value="1"
-              step="0.01"
-              value=${observe(this.volume$.pipe(sampleTime(500)))}
-            />
+            <label for="volume">Volume: ${observe(this.volume$.pipe(map((vol) => vol.toFixed(1))))}</label>
+            <input type="range" id="volume" min="0" max="2" value="1" step="0.01" value=${observe(this.volume$)} />
           </li>
           <li>Freq: <small>${observe(this.currentmouseKeydown$.pipe(map((hz) => hz.toFixed(2))))}</small></li>
           <li>
