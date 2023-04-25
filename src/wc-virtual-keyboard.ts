@@ -45,25 +45,30 @@ export class MyElement extends LitElement {
     shareReplay(1)
   );
   @queryFromEvent("#octave", "change", { returnElementRef: true }) octaveChange$!: Observable<HTMLInputElement>;
-  private octave$ = this.octaveChange$.pipe(
+  private octaveChangeNumber$ = this.octaveChange$.pipe(
     map((el) => el.value),
-    map(Number),
-    filter((octave) => !isNaN(octave)),
+    map(Number)
+  );
+  private octaveSubject = new Subject<number>();
+  private octave$ = merge(this.octaveChangeNumber$, this.octaveSubject).pipe(
+    filter((octave) => !isNaN(octave) && octave >= 0 && octave <= 7),
     startWith(3),
     shareReplay(1)
   );
   private keysToWatch = ["a", "s", "d", "f", "g", "h", "j", "k"];
   private physicalKeydown$ = fromEvent<KeyboardEvent>(document, "keydown").pipe(
     takeUntil(this.teardown$),
-    map(({ key }) => key),
-    filter((key) => this.keysToWatch.includes(key.toLowerCase()))
+    map(({ key }) => key)
   );
   private physicalKeyup$ = fromEvent<KeyboardEvent>(document, "keyup").pipe(
     takeUntil(this.teardown$),
     map(({ key }) => key)
   );
   private physicalKeysDown$ = merge(
-    this.physicalKeydown$.pipe(map((key) => [Action.Add, key] as const)),
+    this.physicalKeydown$.pipe(
+      filter((key) => this.keysToWatch.includes(key.toLowerCase())),
+      map((key) => [Action.Add, key] as const)
+    ),
     this.physicalKeyup$.pipe(map((key) => [Action.Delete, key] as const))
   ).pipe(
     distinctUntilChanged((a, b) => a[0] === b[0] && a[1] === b[1]),
@@ -94,6 +99,9 @@ export class MyElement extends LitElement {
     withLatestFrom(this.octave$),
     map(([notes, octave]) => notes.map((note) => note + octave * 13)),
     map((notes) => notes.map((note) => this.getKeyFreq(note)))
+  );
+  private upDownKeydown$ = this.physicalKeydown$.pipe(
+    filter((key): key is "ArrowUp" | "ArrowDown" => key === "ArrowUp" || key === "ArrowDown")
   );
 
   private mouseKeydown$ = new Subject<number>();
@@ -129,6 +137,13 @@ export class MyElement extends LitElement {
     this.distortion.oversample = "4x";
     this.masterGain.connect(this.audCtx.destination);
     this.masterGain.connect(this.analyser);
+    this.upDownKeydown$.pipe(withLatestFrom(this.octave$)).subscribe(([arrow, octave]) => {
+      if (arrow === "ArrowUp") {
+        this.octaveSubject.next(octave + 1);
+      } else {
+        this.octaveSubject.next(octave - 1);
+      }
+    });
   }
 
   connectedCallback(): void {
@@ -136,7 +151,9 @@ export class MyElement extends LitElement {
     this.volume$.pipe(takeUntil(this.teardown$)).subscribe((volume) => {
       this.masterGain.gain.value = volume;
     });
-    this.currentmouseKeydown$.subscribe((hz) => this.startNote(hz));
+    this.currentmouseKeydown$
+      .pipe(withLatestFrom(this.distortOn$))
+      .subscribe(([hz, distort]) => this.startNote(hz, distort));
     this.stop$.subscribe((hz) => this.stopNote(hz));
     this.physicalKeysDownMapped$.pipe(withLatestFrom(this.distortOn$)).subscribe(([keysDown, distort]) => {
       keysDown.forEach((hz) => {
@@ -258,7 +275,7 @@ export class MyElement extends LitElement {
           <li>Freq: <small>${observe(this.currentmouseKeydown$.pipe(map((hz) => hz.toFixed(2))))}</small></li>
           <li>
             <label for="octave">Octave</label>
-            <input type="number" min="0" id="octave" value=${observe(this.octave$)} />
+            <input type="number" min="0" max="7" id="octave" value=${observe(this.octave$)} />
           </li>
           <li>
             <label for="distort">Distort</label>
@@ -326,11 +343,13 @@ export class MyElement extends LitElement {
       justify-content: center;
       align-items: center;
       user-select: none;
-      border: 1px solid black;
+      border: 1px solid grey;
+      border-radius: 0 0 4px 4px;
     }
     .keyboard .blackkey {
       background-color: black;
       color: white;
+      border-color: black;
     }
 
     .controls {
@@ -354,6 +373,9 @@ export class MyElement extends LitElement {
     .controls small {
       width: 44px;
       overflow: hidden;
+    }
+    .controls input[type="number"] {
+      width: 40px;
     }
     label {
       user-select: none;
