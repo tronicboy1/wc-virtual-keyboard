@@ -2,23 +2,26 @@ import { queryFromEvent } from "@tronicboy/lit-from-event";
 import { observe } from "@tronicboy/lit-observe-directive";
 import { classMap } from "lit/directives/class-map.js";
 import { LitElement, css, html } from "lit";
-import { customElement } from "lit/decorators.js";
+import { customElement, query } from "lit/decorators.js";
 import {
   Observable,
   Subject,
   distinctUntilChanged,
   filter,
   fromEvent,
+  interval,
   map,
   merge,
-  sampleTime,
   scan,
   shareReplay,
+  skip,
   startWith,
   switchMap,
+  take,
   takeUntil,
   withLatestFrom,
 } from "rxjs";
+import { MapSubject } from "./map-subject";
 
 export const tagName = "wc-virtual-keyboard";
 
@@ -127,7 +130,7 @@ export class MyElement extends LitElement {
     )
   );
   private stop$ = merge(this.keyup$, this.mouseleave$);
-  private activeNotes = new Map<number, { osc: OscillatorNode; gain: GainNode }>();
+  private activeNotes = new MapSubject<number, { osc: OscillatorNode; gain: GainNode }>();
   @queryFromEvent("#distort", "input", { returnElementRef: true }) distortChange$!: Observable<HTMLInputElement>;
   private distortOn$ = this.distortChange$.pipe(
     map((el) => el.checked),
@@ -137,6 +140,18 @@ export class MyElement extends LitElement {
   );
   private distortion = this.audCtx.createWaveShaper();
   private analyser = this.audCtx.createAnalyser();
+  private byteTimeDomainData$ = this.activeNotes.value$.pipe(
+    skip(1),
+    switchMap((notes) => (notes.size ? interval(10) : interval(10).pipe(take(50)))),
+    map(() => {
+      const bufferLength = this.analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      this.analyser.getByteTimeDomainData(dataArray);
+      return dataArray;
+    })
+  );
+  @query("canvas") canvas!: HTMLCanvasElement;
+  private canvasWorker = new Worker(new URL("./visualizer-worker.ts", import.meta.url), { type: "module" });
 
   constructor() {
     super();
@@ -144,12 +159,20 @@ export class MyElement extends LitElement {
     this.distortion.oversample = "4x";
     this.masterGain.connect(this.audCtx.destination);
     this.masterGain.connect(this.analyser);
+    this.analyser.fftSize = 2048;
     this.upDownKeydown$
       .pipe(withLatestFrom(this.octave$))
       .subscribe(([arrow, octave]) => this.octaveSubject.next(arrow === "ArrowUp" ? octave + 1 : octave - 1));
     this.lRKeydown$
       .pipe(withLatestFrom(this.volume$))
       .subscribe(([arrow, volume]) => this.volumeSubject.next(arrow === "ArrowLeft" ? volume - 0.1 : volume + 0.1));
+    this.updateComplete.then(() => {
+      const offscreen = this.canvas.transferControlToOffscreen();
+      this.canvasWorker.postMessage(offscreen, [offscreen]);
+    });
+    this.byteTimeDomainData$
+      .pipe(takeUntil(this.teardown$))
+      .subscribe((dataArray) => this.canvasWorker.postMessage(dataArray, [dataArray.buffer]));
   }
 
   connectedCallback(): void {
@@ -281,6 +304,7 @@ export class MyElement extends LitElement {
           </li>
         </ul>
       </nav>
+      <canvas height="300" width="600"></canvas>
       <ul class="keyboard" @mouseleave=${() => this.mouseleaveKeyboard$.next()}>
         ${observe(
           this.octave$.pipe(
@@ -317,6 +341,8 @@ export class MyElement extends LitElement {
       display: flex;
       flex-direction: column;
       justify-content: center;
+      width: 600px;
+      height: 580px;
     }
     li {
       display: flex;
@@ -336,7 +362,7 @@ export class MyElement extends LitElement {
     }
     .keyboard li {
       height: 200px;
-      padding: 0 1rem;
+      flex: 1;
       display: inline-flex;
       justify-content: center;
       align-items: center;
