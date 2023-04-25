@@ -384,6 +384,7 @@ export class MyElement extends LitElement {
       justify-content: center;
       align-items: center;
       user-select: none;
+      -webkit-user-select: none;
       border: 1px solid grey;
       border-radius: 0 0 4px 4px;
     }
