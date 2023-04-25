@@ -62,7 +62,7 @@ export class MyElement extends LitElement {
     startWith(3),
     shareReplay(1)
   );
-  private keysToWatch = ["a", "s", "d", "f", "g", "h", "j", "k"];
+  private keysToWatch = ["a", "s", "d", "f", "g", "h", "j", "k", "w", "e", 't', 'y', 'u'];
   private physicalKeydown$ = fromEvent<KeyboardEvent>(document, "keydown").pipe(
     takeUntil(this.teardown$),
     map(({ key }) => key)
@@ -93,18 +93,23 @@ export class MyElement extends LitElement {
   );
   private keyMappings = new Map([
     ["a", 4],
+    ["w", 5],
     ["s", 6],
+    ["e", 7],
     ["d", 8],
     ["f", 9],
+    ['t', 10],
     ["g", 11],
+    ['y', 12],
     ["h", 13],
+    ['u', 14],
     ["j", 15],
     ["k", 16],
   ]);
   private physicalKeysDownMapped$ = this.physicalKeysDown$.pipe(
     map((keys) => Array.from(keys.values()).map((key) => this.keyMappings.get(key)!)),
     withLatestFrom(this.octave$),
-    map(([notes, octave]) => notes.map((note) => note + octave * 13)),
+    map(([notes, octave]) => notes.map((note) => note + octave * 12)),
     map((notes) => notes.map((note) => this.getKeyFreq(note)))
   );
   private upDownKeydown$ = this.physicalKeydown$.pipe(
@@ -314,8 +319,11 @@ export class MyElement extends LitElement {
             map((keys) =>
               keys.map(
                 ([hz, note]) => html`<li
-                  class=${classMap({ blackkey: this.blackKeyFreqs.has(hz) })}
-                  draggable
+                  class=${observe(
+                    this.activeNotes.value$.pipe(
+                      map((notes) => classMap({ blackkey: this.blackKeyFreqs.has(hz), pressed: notes.has(hz) }))
+                    )
+                  )}
                   @mousedown=${() => this.mouseKeydown$.next(hz)}
                   @mouseup=${() => this.keyup$.next(hz)}
                   @mousemove=${() => this.mousemove$.next(hz)}
@@ -374,6 +382,9 @@ export class MyElement extends LitElement {
       background-color: black;
       color: white;
       border-color: black;
+    }
+    .keyboard .pressed {
+      background-color: grey;
     }
 
     .controls {
