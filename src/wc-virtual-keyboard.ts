@@ -21,6 +21,7 @@ import {
   switchMap,
   take,
   takeUntil,
+  tap,
   withLatestFrom,
 } from "rxjs";
 import { MapSubject } from "./map-subject";
@@ -64,35 +65,12 @@ export class MyElement extends LitElement {
     startWith(3),
     shareReplay(1)
   );
-  private keysToWatch = ["a", "s", "d", "f", "g", "h", "j", "k", "w", "e", "t", "y", "u"];
-  private physicalKeydown$ = fromEvent<KeyboardEvent>(document, "keydown").pipe(
-    takeUntil(this.teardown$),
-    map(({ key }) => key)
-  );
-  private physicalKeyup$ = fromEvent<KeyboardEvent>(document, "keyup").pipe(
-    takeUntil(this.teardown$),
-    map(({ key }) => key)
-  );
+  private physicalKeydown$ = fromEvent<KeyboardEvent>(document, "keydown").pipe(takeUntil(this.teardown$));
+  private physicalKeyup$ = fromEvent<KeyboardEvent>(document, "keyup").pipe(takeUntil(this.teardown$));
   private physicalKeysDown$ = merge(
-    this.physicalKeydown$.pipe(
-      filter((key) => this.keysToWatch.includes(key.toLowerCase())),
-      map((key) => [Action.Add, key] as const)
-    ),
-    this.physicalKeyup$.pipe(map((key) => [Action.Delete, key] as const))
-  ).pipe(
-    distinctUntilChanged((a, b) => a[0] === b[0] && a[1] === b[1]),
-    scan((acc, [action, key]) => {
-      switch (action) {
-        case Action.Delete:
-          acc.delete(key);
-          break;
-        case Action.Add:
-          acc.add(key);
-          break;
-      }
-      return acc;
-    }, new Set<string>())
-  );
+    this.physicalKeydown$.pipe(map(({ key }): [Action, string] => [Action.Add, key])),
+    this.physicalKeyup$.pipe(map(({ key }): [Action, string] => [Action.Delete, key]))
+  ).pipe(this.scanActiveKeys());
   private keyMappings = new Map([
     ["a", 4],
     ["w", 5],
@@ -121,21 +99,19 @@ export class MyElement extends LitElement {
       return keysMappedToFreq;
     })
   );
-  private physicalKeysDownMapped$ = this.physicalKeysDown$.pipe(
-    map((keys) => Array.from(keys.values()).map((key) => this.keyMappings.get(key)!)),
-    withLatestFrom(this.octave$),
-    map(([notes, octave]) => notes.map((note) => note + octave * 12)),
-    map((notes) => notes.map((note) => this.getKeyFreq(note)))
-  );
+
   private upDownKeydown$ = this.physicalKeydown$.pipe(
+    tap((event) => event.preventDefault()),
+    map(({ key }) => key),
     filter((key): key is "ArrowUp" | "ArrowDown" => key === "ArrowUp" || key === "ArrowDown")
   );
   private lRKeydown$ = this.physicalKeydown$.pipe(
+    map(({ key }) => key),
     filter((key): key is "ArrowLeft" | "ArrowRight" => key === "ArrowLeft" || key === "ArrowRight")
   );
 
   private mouseKeydown$ = new Subject<number>();
-  private keyup$ = new Subject<number>();
+  private mouseKeyup$ = new Subject<number>();
   private mouseleave$ = new Subject<number>();
   private mouseleaveKeyboard$ = new Subject<void>();
   private mousemove$ = new Subject<number>();
@@ -143,19 +119,23 @@ export class MyElement extends LitElement {
     switchMap((hz) =>
       this.mousemove$.pipe(
         startWith(hz),
-        takeUntil(this.keyup$),
+        takeUntil(this.mouseKeyup$),
         takeUntil(this.mouseleaveKeyboard$),
         distinctUntilChanged()
       )
     )
   );
-  private stop$ = merge(this.keyup$, this.mouseleave$);
+  private stop$ = merge(this.mouseKeyup$, this.mouseleave$);
   private mouseKeysDownSet$ = merge(
     this.currentmouseKeydown$.pipe(map<number, [Action, number]>((hz) => [Action.Add, hz])),
     this.stop$.pipe(map<number, [Action, number]>((hz) => [Action.Delete, hz]))
   ).pipe(this.scanActiveKeys());
-  private mergedKeysDown$ = combineLatest([this.physicalKeysDownMappedSet$, this.mouseKeysDownSet$]).pipe(
-    map(([keyboard, mouse]) => new Set([...keyboard, ...mouse]))
+  private mergedKeysDown$ = combineLatest([
+    this.physicalKeysDownMappedSet$.pipe(startWith(new Set<number>())),
+    this.mouseKeysDownSet$.pipe(startWith(new Set<number>())),
+  ]).pipe(
+    map(([keyboard, mouse]) => new Set([...keyboard, ...mouse])),
+    distinctUntilChanged((a, b) => a.size === 0 && b.size === 0)
   );
   private activeNotes = new MapSubject<number, { osc: OscillatorNode; gain: GainNode }>();
   @queryFromEvent("#distort", "input", { returnElementRef: true }) distortChange$!: Observable<HTMLInputElement>;
@@ -200,7 +180,6 @@ export class MyElement extends LitElement {
     this.byteTimeDomainData$
       .pipe(takeUntil(this.teardown$))
       .subscribe((dataArray) => this.canvasWorker.postMessage(dataArray, [dataArray.buffer]));
-    this.mergedKeysDown$.subscribe(console.log);
   }
 
   connectedCallback(): void {
@@ -208,17 +187,12 @@ export class MyElement extends LitElement {
     this.volume$.pipe(takeUntil(this.teardown$)).subscribe((volume) => {
       this.masterGain.gain.value = volume;
     });
-    this.currentmouseKeydown$
-      .pipe(withLatestFrom(this.distortOn$))
-      .subscribe(([hz, distort]) => this.startNote(hz, distort));
-    this.stop$.subscribe((hz) => this.stopNote(hz));
-    this.physicalKeysDownMapped$.pipe(withLatestFrom(this.distortOn$)).subscribe(([keysDown, distort]) => {
+    this.mergedKeysDown$.pipe(withLatestFrom(this.distortOn$)).subscribe(([keysDown, distort]) => {
       keysDown.forEach((hz) => {
-        if (this.activeNotes.has(hz)) return;
         this.startNote(hz, distort);
       });
       this.activeNotes.forEach((_, hz) => {
-        if (!keysDown.includes(hz)) {
+        if (!keysDown.has(hz)) {
           this.stopNote(hz);
         }
       });
@@ -328,8 +302,7 @@ export class MyElement extends LitElement {
               break;
           }
           return acc;
-        }, new Set<T>()),
-        distinctUntilChanged((a, b) => b.size === 0)
+        }, new Set<T>())
       );
   }
 
@@ -375,7 +348,7 @@ export class MyElement extends LitElement {
                     )
                   )}
                   @mousedown=${() => this.mouseKeydown$.next(hz)}
-                  @mouseup=${() => this.keyup$.next(hz)}
+                  @mouseup=${() => this.mouseKeyup$.next(hz)}
                   @mousemove=${() => this.mousemove$.next(hz)}
                   @mouseleave=${() => this.mouseleave$.next(hz)}
                 >
