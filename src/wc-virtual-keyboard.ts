@@ -5,7 +5,9 @@ import { LitElement, css, html } from "lit";
 import { customElement, query } from "lit/decorators.js";
 import {
   Observable,
+  OperatorFunction,
   Subject,
+  combineLatest,
   distinctUntilChanged,
   filter,
   fromEvent,
@@ -106,6 +108,19 @@ export class MyElement extends LitElement {
     ["j", 15],
     ["k", 16],
   ]);
+  private physicalKeysDownMappedSet$ = this.physicalKeysDown$.pipe(
+    withLatestFrom(this.octave$),
+    map(([keys, octave]) => {
+      const keysMappedToFreq = new Set<number>();
+      keys.forEach((key) => {
+        const pianoKeyNo = this.keyMappings.get(key);
+        if (!pianoKeyNo) return;
+        const keyNoAdjustedToOctave = octave * 12 + pianoKeyNo;
+        keysMappedToFreq.add(this.getKeyFreq(keyNoAdjustedToOctave));
+      });
+      return keysMappedToFreq;
+    })
+  );
   private physicalKeysDownMapped$ = this.physicalKeysDown$.pipe(
     map((keys) => Array.from(keys.values()).map((key) => this.keyMappings.get(key)!)),
     withLatestFrom(this.octave$),
@@ -135,6 +150,13 @@ export class MyElement extends LitElement {
     )
   );
   private stop$ = merge(this.keyup$, this.mouseleave$);
+  private mouseKeysDownSet$ = merge(
+    this.currentmouseKeydown$.pipe(map<number, [Action, number]>((hz) => [Action.Add, hz])),
+    this.stop$.pipe(map<number, [Action, number]>((hz) => [Action.Delete, hz]))
+  ).pipe(this.scanActiveKeys());
+  private mergedKeysDown$ = combineLatest([this.physicalKeysDownMappedSet$, this.mouseKeysDownSet$]).pipe(
+    map(([keyboard, mouse]) => new Set([...keyboard, ...mouse]))
+  );
   private activeNotes = new MapSubject<number, { osc: OscillatorNode; gain: GainNode }>();
   @queryFromEvent("#distort", "input", { returnElementRef: true }) distortChange$!: Observable<HTMLInputElement>;
   private distortOn$ = this.distortChange$.pipe(
@@ -178,6 +200,7 @@ export class MyElement extends LitElement {
     this.byteTimeDomainData$
       .pipe(takeUntil(this.teardown$))
       .subscribe((dataArray) => this.canvasWorker.postMessage(dataArray, [dataArray.buffer]));
+    this.mergedKeysDown$.subscribe(console.log);
   }
 
   connectedCallback(): void {
@@ -289,6 +312,25 @@ export class MyElement extends LitElement {
       curve[i] = ((3 + amount) * x * 20 * deg) / (Math.PI + amount * Math.abs(x));
     }
     return curve;
+  }
+
+  private scanActiveKeys<T extends string | number>(): OperatorFunction<[Action, T], Set<T>> {
+    return (source) =>
+      source.pipe(
+        distinctUntilChanged((a, b) => a[0] === b[0] && a[1] === b[1]),
+        scan((acc, [action, key]) => {
+          switch (action) {
+            case Action.Delete:
+              acc.delete(key);
+              break;
+            case Action.Add:
+              acc.add(key);
+              break;
+          }
+          return acc;
+        }, new Set<T>()),
+        distinctUntilChanged((a, b) => b.size === 0)
+      );
   }
 
   render() {
