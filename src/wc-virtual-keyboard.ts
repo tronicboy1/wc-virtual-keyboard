@@ -10,6 +10,7 @@ import {
   combineLatest,
   distinctUntilChanged,
   filter,
+  first,
   fromEvent,
   interval,
   map,
@@ -123,9 +124,10 @@ export class MyElement extends LitElement {
         takeUntil(this.mouseleaveKeyboard$),
         distinctUntilChanged()
       )
-    )
+    ),
+    shareReplay(1)
   );
-  private stop$ = merge(this.mouseKeyup$, this.mouseleave$);
+  private stop$ = merge(this.mouseKeyup$, this.mouseleave$, this.upDownKeydown$.pipe(switchMap(() => this.currentmouseKeydown$.pipe(first()))));
   private mouseKeysDownSet$ = merge(
     this.currentmouseKeydown$.pipe(map<number, [Action, number]>((hz) => [Action.Add, hz])),
     this.stop$.pipe(map<number, [Action, number]>((hz) => [Action.Delete, hz]))
